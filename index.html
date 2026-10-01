@@ -1,0 +1,60 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Empire of Gods — free demo</title>
+<meta name="description" content="Eight Greek gods run a scrappy space-station startup. Keyless demo of Empire of Gods.">
+<!-- Keyless public demo: no backend, no API key, no network calls. Everything below is local files. -->
+<!-- connect-src 'none' makes the browser itself refuse any fetch/XHR/WebSocket/beacon from this page. -->
+<meta http-equiv="Content-Security-Policy" content="connect-src 'none'; form-action 'none'">
+<meta name="referrer" content="no-referrer">
+<link rel="stylesheet" href="css/demo.css">
+</head>
+<body>
+<canvas id="stage" aria-label="Pixel-art space station with the god crew walking around"></canvas>
+<div class="crt" aria-hidden="true"></div>
+
+<div id="splash" class="splash">
+  <div class="splash-inner">
+    <div class="wordmark">EMPIRE OF GODS</div>
+    <div class="tagline">eight gods &middot; one space station &middot; zero adult supervision</div>
+    <div class="press">CLICK OR PRESS ANY KEY</div>
+  </div>
+</div>
+
+<header class="hud">
+  <button id="demo-badge" class="badge" type="button" title="What is demo mode?">&#9679; DEMO MODE</button>
+  <div class="title">EMPIRE OF GODS <span class="sub">// OLYMPUS STATION</span></div>
+  <div class="hud-actions">
+    <button id="btn-share" class="hud-btn" type="button" title="Save a share card (PNG)">&#128248; SHARE</button>
+    <button id="btn-full" class="hud-btn accent" type="button">GET THE FULL GAME</button>
+  </div>
+</header>
+
+<aside id="feed" class="feed" aria-live="polite">
+  <div class="feed-head">CREW COMMS</div>
+  <ol id="feed-list"></ol>
+</aside>
+
+<div id="upsell" class="upsell" hidden role="dialog" aria-labelledby="upsell-title">
+  <button class="upsell-x" type="button" aria-label="Close">&times;</button>
+  <div id="upsell-title" class="upsell-title">YOU'RE WATCHING THE DEMO</div>
+  <p>This crew is running on a <b>script</b>. Bring your own API key to make the crew actually think &mdash; they'll take on your real tasks, argue about them, and ship.</p>
+  <p class="upsell-free">Full version is <b>free &amp; open source</b> (MIT).</p>
+  <div class="upsell-links">
+    <a id="link-play" class="hud-btn accent" href="https://mrjcarrazco.github.io/eog" target="_blank" rel="noopener">PLAY THE FULL VERSION</a>
+    <a id="link-github" class="hud-btn" href="#" target="_blank" rel="noopener">SOURCE ON GITHUB</a>
+  </div>
+</div>
+
+<div id="toast" class="toast" hidden></div>
+
+<script src="js/demo-data.js"></script>
+<script src="js/sprite-load-plan.js"></script>
+<script src="assets/sprites/manifest.js"></script>
+<script src="js/assets.js"></script>
+<script src="data/banter.js"></script>
+<script src="js/demo.js"></script>
+</body>
+</html>
