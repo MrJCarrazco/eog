@@ -100,7 +100,14 @@ def check():
     if size >= MAX_BYTES:
         raise Fail("assets/og.png is %d bytes (limit < %d)" % (size, MAX_BYTES))
     with open(OG, "rb") as f:
-        w, h, rows = decode_png(f.read())
+        try:
+            w, h, rows = decode_png(f.read())
+        except Fail:
+            raise
+        except Exception as e:
+            # A truncated/corrupt PNG must report a named failure, not a traceback.
+            raise Fail("assets/og.png is not a readable PNG (%s: %s)"
+                       % (type(e).__name__, e))
     if (w, h) != (1200, 630):
         raise Fail("assets/og.png is %dx%d, expected 1200x630" % (w, h))
     pixels = [p for row in rows for p in row]
