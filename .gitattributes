@@ -1,0 +1,12 @@
+# The demo's index.html is LF-only by design and check_social_card.py asserts CR==0.
+# Without this, a global core.autocrlf=true rewrites it to CRLF on checkout and the
+# gate fails on a clean clone even though the committed blob is correct.
+*.html text eol=lf
+*.css  text eol=lf
+*.js   text eol=lf
+*.json text eol=lf
+*.py   text eol=lf
+*.md   text eol=lf
+
+*.png  binary
+*.woff2 binary
