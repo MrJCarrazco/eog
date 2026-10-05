@@ -11,7 +11,6 @@
   'use strict';
 
   /* ---------- config ---------- */
-  var PLAY_URL = 'https://mrjcarrazco.github.io/eog';
   var PLAY_LABEL = 'mrjcarrazco.github.io/eog';
   var GITHUB_URL = 'https://github.com/MrJCarrazco/eog';
 
@@ -1128,7 +1127,6 @@
   if (/TODO/.test(GITHUB_URL)) {
     gh.classList.add('disabled'); gh.removeAttribute('href'); gh.textContent = 'GITHUB: LINK COMING SOON';
   } else gh.href = GITHUB_URL;
-  document.getElementById('link-play').href = PLAY_URL;
 
   var toastEl = document.getElementById('toast'), toastT = 0;
   function toast(msg) {
