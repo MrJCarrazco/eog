@@ -61,7 +61,8 @@ else
 		short=$(printf %.12s "$lsha")
 		dir="$TMP/$short"
 		mkdir -p "$dir" || fail "cannot create $dir"
-		git -C "$ROOT" archive --format=tar -o "$TMP/$short.tar" "$lsha" ||
+		# redirect, not -o: native git.exe on Windows cannot open an MSYS /c/... path
+		git -C "$ROOT" archive --format=tar "$lsha" >"$TMP/$short.tar" ||
 			fail "git archive of $lsha failed"
 		tar -xf "$TMP/$short.tar" -C "$dir" || fail "cannot extract $lsha"
 		run_gates "$dir" "commit $short ($lref)"
