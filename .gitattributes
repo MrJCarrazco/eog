@@ -7,6 +7,9 @@
 *.json text eol=lf
 *.py   text eol=lf
 *.md   text eol=lf
+*.yml  text eol=lf
+# hooks/pre-push is run by sh; a CRLF checkout would break its shebang and every line.
+hooks/* text eol=lf
 
 *.png  binary
 *.woff2 binary

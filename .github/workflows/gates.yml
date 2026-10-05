@@ -1,0 +1,49 @@
+# DETECTIVE, not preventive.
+# GitHub Pages for this repo is build_type "legacy": it publishes straight from the
+# main branch, independently of Actions. By the time this workflow runs, a push to
+# main is already deploying - a red run here REPORTS a bad deploy, it cannot stop one.
+# The PREVENTIVE gate is hooks/pre-push (activate: git config core.hooksPath hooks).
+# This workflow also catches pushes made from other clones or with --no-verify.
+name: gates
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  gates:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.x'
+      - name: check_social_card.py
+        run: python check_social_card.py
+      - name: check_paid_exit.py
+        run: python check_paid_exit.py
+
+  live:
+    # Post-deploy: does https://mrjcarrazco.github.io/eog/ serve the bytes at this commit?
+    if: github.event_name == 'push' || github.event_name == 'workflow_dispatch'
+    needs: gates
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.x'
+      - name: check_live.py (retries to absorb Pages propagation lag)
+        run: |
+          for i in 1 2 3 4 5 6 7 8; do
+            if python check_live.py; then exit 0; fi
+            echo "attempt $i/8 failed; retrying in 45s"
+            sleep 45
+          done
+          echo "check_live.py still failing after 8 attempts"
+          exit 1

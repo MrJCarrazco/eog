@@ -1,0 +1,77 @@
+#!/bin/sh
+# PREVENTIVE gate for this repo. GitHub Pages here is build_type "legacy" (publishes
+# straight from main), so `git push` IS the deploy: this hook is the only point that
+# can stop bad bytes before they go live. .github/workflows/gates.yml is the detective
+# net (reports after the fact, also covers pushes made elsewhere or with --no-verify).
+#
+# Activate once per clone:  git config core.hooksPath hooks
+#
+# Each commit being pushed is exported (git archive) to a scratch dir and the gates run
+# against THAT tree, so a passing-but-uncommitted working tree cannot mask a broken
+# commit. Run by hand with no stdin (sh hooks/pre-push </dev/null) it checks the
+# working tree instead.
+#
+# FAIL CLOSED: missing python, a missing gate, or an export/run error refuses the push.
+# check_live.py is deliberately NOT run here: Pages lags a push, so it is post-deploy only.
+
+GATES="check_social_card.py check_paid_exit.py"
+ZERO=0000000000000000000000000000000000000000
+
+fail() {
+	echo "pre-push: PUSH REFUSED: $*" >&2
+	exit 1
+}
+
+ROOT=$(cd "$(dirname "$0")/.." 2>/dev/null && git rev-parse --show-toplevel 2>/dev/null) ||
+	fail "cannot resolve repo root from $0"
+[ -n "$ROOT" ] || fail "cannot resolve repo root from $0"
+
+PY=
+for c in python python3; do
+	if "$c" -c "import sys; sys.exit(0 if sys.version_info[0] == 3 else 1)" >/dev/null 2>&1; then
+		PY=$c
+		break
+	fi
+done
+[ -n "$PY" ] || fail "no working python 3 on PATH (tried python, python3); gates cannot run"
+
+# run_gates <dir> <label>: run every gate from <dir>; any non-zero exit or missing gate fails.
+run_gates() {
+	for g in $GATES; do
+		[ -f "$1/$g" ] || fail "gate $g missing in $2"
+		echo "pre-push: [$2] $g" >&2
+		(cd "$1" && "$PY" "$g") >&2
+		rc=$?
+		[ "$rc" -eq 0 ] || fail "gate $g FAILED (exit $rc) in $2"
+	done
+}
+
+TMP=$(mktemp -d 2>/dev/null) || fail "mktemp failed"
+[ -n "$TMP" ] && [ -d "$TMP" ] || fail "mktemp failed"
+trap 'rm -rf "$TMP"' EXIT
+trap 'exit 1' HUP INT TERM
+
+checked=0
+if [ -t 0 ]; then
+	: # interactive / no ref list: fall through to the working-tree check
+else
+	while read -r lref lsha rref rsha; do
+		[ -n "$lsha" ] || continue
+		[ "$lsha" = "$ZERO" ] && continue # branch deletion: nothing to check
+		short=$(printf %.12s "$lsha")
+		dir="$TMP/$short"
+		mkdir -p "$dir" || fail "cannot create $dir"
+		git -C "$ROOT" archive --format=tar -o "$TMP/$short.tar" "$lsha" ||
+			fail "git archive of $lsha failed"
+		tar -xf "$TMP/$short.tar" -C "$dir" || fail "cannot extract $lsha"
+		run_gates "$dir" "commit $short ($lref)"
+		checked=$((checked + 1))
+	done
+fi
+
+if [ "$checked" -eq 0 ]; then
+	run_gates "$ROOT" "working tree"
+fi
+
+echo "pre-push: all gates passed" >&2
+exit 0
