@@ -52,12 +52,18 @@ trap 'rm -rf "$TMP"' EXIT
 trap 'exit 1' HUP INT TERM
 
 checked=0
+saw_ref=0
 if [ -t 0 ]; then
 	: # interactive / no ref list: fall through to the working-tree check
 else
 	while read -r lref lsha rref rsha; do
 		[ -n "$lsha" ] || continue
-		[ "$lsha" = "$ZERO" ] && continue # branch deletion: nothing to check
+		saw_ref=1
+		# Branch deletion: nothing is being published, so there are no bytes to gate.
+		# It must NOT fall through to the working-tree check -- an unrelated dirty tree
+		# would then block a harmless delete (observed: deleting a test branch while a
+		# broken tree was checked out was refused for the wrong reason).
+		[ "$lsha" = "$ZERO" ] && continue
 		short=$(printf %.12s "$lsha")
 		dir="$TMP/$short"
 		mkdir -p "$dir" || fail "cannot create $dir"
@@ -70,7 +76,7 @@ else
 	done
 fi
 
-if [ "$checked" -eq 0 ]; then
+if [ "$checked" -eq 0 ] && [ "$saw_ref" -eq 0 ]; then
 	run_gates "$ROOT" "working tree"
 fi
 
