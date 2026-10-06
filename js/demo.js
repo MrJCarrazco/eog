@@ -1049,7 +1049,7 @@
   window.addEventListener('keydown', function (e) { if (e.key === 'Escape') closeDialog(clock.now); });
 
   /* ---------- sprite streaming: nearest gods first ---------- */
-  var perf = { t0: 0, first6Ms: null, allMs: null, frameMs: 16.7, fpsSamples: [], dpr: 1 };
+  var perf = { t0: 0, first6Ms: null, allMs: null, settledMs: null, failed: 0, frameMs: 16.7, fpsSamples: [], dpr: 1 };
   function markLoaded(b) {
     b.loaded = true;
     b.landedAt = clock.now;
@@ -1060,9 +1060,12 @@
     var cx = WW / 2, cy = (WALL_ROWS * T + WH) / 2;
     var order = bodies.slice().sort(function (a, b) { return Math.hypot(a.px - cx, a.py - cy) - Math.hypot(b.px - cx, b.py - cy); });
     var first = order.slice(0, 6), rest = order.slice(6);
-    var load = function (b) { return SPRITES.ensureSkin(b.skin).then(function (okk) { if (okk) markLoaded(b); }); };
+    var load = function (b) {
+      return SPRITES.ensureSkin(b.skin).then(function (okk) { if (okk) markLoaded(b); else perf.failed++; },
+                                             function () { perf.failed++; });
+    };
     Promise.all(first.map(load)).then(function () {
-      perf.first6Ms = Math.round(performance.now() - perf.t0);
+      if (!perf.failed) perf.first6Ms = Math.round(performance.now() - perf.t0);
       // stream the rest two at a time so the first six keep the main thread
       var i = 0;
       function next() {
@@ -1071,7 +1074,10 @@
         return Promise.all(batch.map(load)).then(next);
       }
       return next();
-    }).then(function () { perf.allMs = Math.round(performance.now() - perf.t0); });
+    }).then(function () {
+      perf.settledMs = Math.round(performance.now() - perf.t0);
+      if (!perf.failed) perf.allMs = perf.settledMs;
+    });
   }
 
   /* ---------- main loop ---------- */
@@ -1221,7 +1227,8 @@
     perf: function () {
       var s = perf.fpsSamples.slice().sort(function (a, b) { return a - b; });
       return { avgFps: Math.round(1000 / perf.frameMs), p95FrameMs: s.length ? Math.round(s[Math.floor(s.length * 0.95)]) : null,
-        dpr: dpr, first6Ms: perf.first6Ms, allMs: perf.allMs, sheets: SPRITES.loadStats() };
+        dpr: dpr, first6Ms: perf.first6Ms, allMs: perf.allMs, settledMs: perf.settledMs,
+        failedSheets: perf.failed, sheets: SPRITES.loadStats() };
     },
     shareCardDataURL: function () { return buildShareCard().toDataURL('image/png'); }
   };

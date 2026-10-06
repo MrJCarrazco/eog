@@ -13,6 +13,7 @@ ROOT = os.path.dirname(os.path.abspath(__file__))
 PAID = b'https://mrjcarrazco.gumroad.com/l/rqaxx'
 DEAD_ID = b'link-' + b'play'
 RETIRED_CLAIM = b'Full version' + b' is'
+RATE = b'https://mrjcarrazco.itch.io/empire-of-gods/rate'
 BANNED_REF = b'ingest' + b'/starnet'
 SKIP_DIRS = {'.git', '.claude'}
 # Gate scripts hold the banned path only as a search needle, not as a dependency.
@@ -147,6 +148,50 @@ def check_banned_ref(html, js):
         return 'file(s) reference %s: %s' % (BANNED_REF.decode(), ', '.join(hits))
 
 
+def check_engagement_exit(html, js):
+    """The post-play modal must also ASK for the free engagement signals.
+
+    itch's own browse ranking (new-and-popular, already a live referrer for this
+    listing) is fed by ratings/collections/comments. The listing had 0 of all three
+    after 10 plays because nothing in the game ever asked. This check keeps the ask
+    present; it does NOT replace or weaken the paid exit (checks 1 and 2).
+    """
+    up = upsell_block(html)
+    if up is None:
+        return '#upsell block not found'
+    if not any((attr(a, b'href') or b'') == RATE for a in anchors(up)):
+        return 'no itch rating anchor (href=%s) inside #upsell' % RATE.decode()
+
+
+def strip_js_comments(js):
+    """Executable lines only: a rule must never be satisfied by a comment ABOUT it."""
+    js = re.sub(rb'/\*.*?\*/', b'', js, flags=re.S)
+    return re.sub(rb'(?m)^\s*//.*$', b'', js)
+
+
+def check_sprite_sensor_honest(html, js):
+    """perf.allMs/first6Ms must mean 'every atlas arrived', not 'the promise settled'.
+
+    load() used to swallow a failed atlas (ensureSkin resolving false still resolved),
+    so a run where sheets 404'd was indistinguishable from a clean run.
+    """
+    code = strip_js_comments(js)
+    why = []
+    if b'perf.failed++' not in code:
+        why.append('sprite load() does not count a failed atlas (no perf.failed++)')
+    for field in (b'allMs', b'first6Ms'):
+        if not re.search(rb'if \(!perf\.failed\)\s*perf\.' + field + rb'\s*=', code):
+            why.append('perf.%s assignment is not guarded by !perf.failed' % field.decode())
+    for m in re.finditer(rb'perf\.(?:allMs|first6Ms)\s*=', code):
+        line = code[code.rfind(bytes([10]), 0, m.start()) + 1:m.start()]
+        if b'if (!perf.failed)' not in line:
+            why.append('unguarded completion stamp: %r' % line.strip()[:60])
+    if b'failedSheets' not in code:
+        why.append('perf() does not report failedSheets to its reader')
+    if why:
+        return '; '.join(why)
+
+
 # (name, check, live) - live checks see index.html with <!-- comments --> removed,
 # so a commented-out tag or a comment naming a directive can neither pass nor fail them.
 CHECKS = [
@@ -158,6 +203,8 @@ CHECKS = [
     ('6 CSP + no-referrer intact', check_csp, True),
     ('7 LF-only line endings', check_crlf, False),
     ('8 no banned ingest reference', check_banned_ref, False),
+    ('9 itch engagement exit in #upsell', check_engagement_exit, True),
+    ('10 sprite sensor cannot fake completion', check_sprite_sensor_honest, False),
 ]
 
 
