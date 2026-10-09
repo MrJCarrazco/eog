@@ -160,8 +160,23 @@ def check_engagement_exit(html, js):
     up = upsell_block(html)
     if up is None:
         return '#upsell block not found'
-    if not any((attr(a, b'href') or b'') == RATE for a in anchors(up)):
+    rate_tags = [a for a in anchors(up) if (attr(a, b'href') or b'') == RATE]
+    if not rate_tags:
         return 'no itch rating anchor (href=%s) inside #upsell' % RATE.decode()
+    # Pin the ask's TEXT (council eog 2026-10-09): the label lives just after the
+    # anchor tag; assert it verbatim so a reworded/emptied ask is a failure.
+    if b'RATE IT ON ITCH' not in up:
+        return 'rating ask label "RATE IT ON ITCH" missing from #upsell'
+    # Pin the itch-surface promotion (council eog 2026-10-09): on *.itch.io/.zone
+    # the rating ask is moved AHEAD of the $19 exit at runtime. Deleting or
+    # defanging that mechanism must close the gate. Static order (paid first on
+    # Pages) is deliberate and stays as-is.
+    if b'promoteRatingOnItch' not in js:
+        return 'promoteRatingOnItch() missing from demo.js (itch-surface rating promotion deleted)'
+    if br'/(^|\.)itch\.(io|zone)$/' not in js:
+        return 'itch-surface host guard missing/altered in promoteRatingOnItch'
+    if b"insertBefore(rate, buy)" not in js:
+        return 'promotion no longer reorders rate ahead of buy (insertBefore gone)'
 
 
 def check_itch_referrer_attribution(html, js):

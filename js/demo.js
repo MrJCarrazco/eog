@@ -1129,6 +1129,19 @@
   document.getElementById('btn-full').addEventListener('click', openUpsell);
   upsell.querySelector('.upsell-x').addEventListener('click', function () { upsell.hidden = true; });
   setTimeout(function () { if (!upsellShown && !dlg) openUpsell(); }, 75000);
+  /* Council eog 2026-10-09: on the ITCH-SERVED surface only, the free 2-click
+     rating ask outranks the $19 exit — itch's browse ranking pays in ratings
+     and the player's itch login is already at hand there. On GitHub Pages the
+     static order stands (paid exit first) because rating needs an itch login.
+     DOM reorder only: no anchor is added/removed, so gate checks 9 and 11
+     (ask present, exactly 3 itch anchors with referrerpolicy=origin) hold. */
+  (function promoteRatingOnItch() {
+    var host = location.hostname;
+    if (!/(^|\.)itch\.(io|zone)$/.test(host)) return;
+    var rate = document.getElementById('link-rate');
+    var buy = document.getElementById('link-buy');
+    if (rate && buy && buy.parentNode) buy.parentNode.insertBefore(rate, buy);
+  })();
   var gh = document.getElementById('link-github');
   if (/TODO/.test(GITHUB_URL)) {
     gh.classList.add('disabled'); gh.removeAttribute('href'); gh.textContent = 'GITHUB: LINK COMING SOON';
