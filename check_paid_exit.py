@@ -14,6 +14,7 @@ PAID = b'https://mrjcarrazco.gumroad.com/l/rqaxx'
 DEAD_ID = b'link-' + b'play'
 RETIRED_CLAIM = b'Full version' + b' is'
 RATE = b'https://mrjcarrazco.itch.io/empire-of-gods/rate'
+ITCH_ORIGIN = b'https://mrjcarrazco.itch.io/'
 BANNED_REF = b'ingest' + b'/starnet'
 SKIP_DIRS = {'.git', '.claude'}
 # Gate scripts hold the banned path only as a search needle, not as a dependency.
@@ -163,6 +164,32 @@ def check_engagement_exit(html, js):
         return 'no itch rating anchor (href=%s) inside #upsell' % RATE.decode()
 
 
+def check_itch_referrer_attribution(html, js):
+    """The 3 itch anchors must carry referrerpolicy="origin"; nothing else may.
+
+    R-EOG3's page-wide no-referrer (check 6) means a click from this demo used to
+    reach itch with NO Referer, so itch's referrer table could never attribute the
+    demo and every T0/T+1 referrer analysis only saw traffic itch itself records.
+    Council eog-game 2026-10-05 deferred-then-approved the narrow fix: ONLY
+    mrjcarrazco.itch.io anchors may carry a per-element override, and "origin"
+    sends just https://mrjcarrazco.github.io/ (no path). A referrerpolicy on any
+    other anchor is a posture widening and closes the gate.
+    """
+    why = []
+    for a in anchors(html):
+        href = attr(a, b'href') or b''
+        pol = attr(a, b'referrerpolicy')
+        if href.startswith(ITCH_ORIGIN):
+            if pol != b'origin':
+                why.append('itch anchor %r lacks referrerpolicy="origin" (got %r)'
+                           % (attr(a, b'id'), pol))
+        elif pol is not None:
+            why.append('non-itch anchor %r carries referrerpolicy=%r (only '
+                       'mrjcarrazco.itch.io anchors may)' % (attr(a, b'id'), pol))
+    if why:
+        return '; '.join(why)
+
+
 def strip_js_comments(js):
     """Executable lines only: a rule must never be satisfied by a comment ABOUT it."""
     js = re.sub(rb'/\*.*?\*/', b'', js, flags=re.S)
@@ -205,6 +232,7 @@ CHECKS = [
     ('8 no banned ingest reference', check_banned_ref, False),
     ('9 itch engagement exit in #upsell', check_engagement_exit, True),
     ('10 sprite sensor cannot fake completion', check_sprite_sensor_honest, False),
+    ('11 itch referrer attribution pinned', check_itch_referrer_attribution, True),
 ]
 
 
