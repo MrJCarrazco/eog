@@ -180,7 +180,7 @@ def check_engagement_exit(html, js):
 
 
 def check_itch_referrer_attribution(html, js):
-    """The 3 itch anchors must carry referrerpolicy="origin"; nothing else may.
+    """Exactly the 3 pinned itch anchors carry referrerpolicy="origin"; nothing else may.
 
     R-EOG3's page-wide no-referrer (check 6) means a click from this demo used to
     reach itch with NO Referer, so itch's referrer table could never attribute the
@@ -189,18 +189,51 @@ def check_itch_referrer_attribution(html, js):
     mrjcarrazco.itch.io anchors may carry a per-element override, and "origin"
     sends just https://mrjcarrazco.github.io/ (no path). A referrerpolicy on any
     other anchor is a posture widening and closes the gate.
+
+    Tightened by council distribution 2026-10-09 (R-D19/R-D20): the attributed
+    population is PINNED by id+href+count (a 4th itch anchor used to pass the old
+    host-prefix rule silently), each pinned anchor's rel must not contain
+    "noreferrer" (that token overrides referrerpolicy=origin in the browser and
+    would re-blind the channel while every gate stayed green), and referrerpolicy
+    on ANY element -- not just anchors -- is counted, so an instrumented img or
+    iframe cannot widen the posture unseen.
     """
+    pinned = {
+        b'link-itch': b'https://mrjcarrazco.itch.io/empire-of-gods',
+        b'link-rate': b'https://mrjcarrazco.itch.io/empire-of-gods/rate',
+        b'link-itch2': b'https://mrjcarrazco.itch.io/empire-of-gods',
+    }
     why = []
+    seen = {}
     for a in anchors(html):
+        aid = attr(a, b'id') or b''
         href = attr(a, b'href') or b''
         pol = attr(a, b'referrerpolicy')
-        if href.startswith(ITCH_ORIGIN):
+        rel = attr(a, b'rel') or b''
+        if aid in pinned:
+            seen[aid] = True
+            if href != pinned[aid]:
+                why.append('pinned anchor %r href drifted to %r' % (aid, href))
             if pol != b'origin':
-                why.append('itch anchor %r lacks referrerpolicy="origin" (got %r)'
-                           % (attr(a, b'id'), pol))
+                why.append('pinned anchor %r lacks referrerpolicy="origin" (got %r)'
+                           % (aid, pol))
+            if b'noreferrer' in rel:
+                why.append('pinned anchor %r rel contains "noreferrer" which '
+                           'overrides referrerpolicy=origin (got rel=%r)' % (aid, rel))
+        elif href.startswith(ITCH_ORIGIN):
+            why.append('unpinned itch anchor %r (href=%r): the attributed '
+                       'population is pinned to %d anchors' % (aid, href, len(pinned)))
         elif pol is not None:
             why.append('non-itch anchor %r carries referrerpolicy=%r (only '
-                       'mrjcarrazco.itch.io anchors may)' % (attr(a, b'id'), pol))
+                       'the pinned itch anchors may)' % (aid, pol))
+    for aid in pinned:
+        if aid not in seen:
+            why.append('pinned itch anchor %r is MISSING' % (aid,))
+    n_pol = len(re.findall(rb'referrerpolicy\s*=', html))
+    if n_pol != len(pinned):
+        why.append('document carries %d referrerpolicy attribute(s), pinned '
+                   'population is %d (non-anchor elements count too)'
+                   % (n_pol, len(pinned)))
     if why:
         return '; '.join(why)
 
