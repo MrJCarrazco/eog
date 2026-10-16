@@ -13,8 +13,13 @@
 #
 # FAIL CLOSED: missing python, a missing gate, or an export/run error refuses the push.
 # check_live.py is deliberately NOT run here: Pages lags a push, so it is post-deploy only.
+#
+# check_responsive_hud.mjs (real headless Chrome, 14 pinned viewports) also runs against
+# each exported commit. Its CODE comes from HEAD when HEAD has it (trusted), else from the
+# commit itself. Missing node (>= 22) or browser exits non-zero = push refused.
 
 GATES="check_social_card.py check_paid_exit.py"
+HUD_GATE=check_responsive_hud.mjs
 ZERO=0000000000000000000000000000000000000000
 
 fail() {
@@ -34,8 +39,11 @@ for c in python python3; do
 	fi
 done
 [ -n "$PY" ] || fail "no working python 3 on PATH (tried python, python3); gates cannot run"
+node -e "process.exit(+process.versions.node.split('.')[0] >= 22 ? 0 : 1)" >/dev/null 2>&1 ||
+	fail "no node >= 22 on PATH; $HUD_GATE cannot run"
 
-# run_gates <dir> <label>: run every gate from <dir>; any non-zero exit or missing gate fails.
+# run_gates <dir> <label> [trusted]: run every gate from <dir>; any non-zero exit or missing gate fails.
+# With "trusted", the HUD gate's code is taken from HEAD (written into the scratch <dir>).
 run_gates() {
 	for g in $GATES; do
 		[ -f "$1/$g" ] || fail "gate $g missing in $2"
@@ -44,9 +52,22 @@ run_gates() {
 		rc=$?
 		[ "$rc" -eq 0 ] || fail "gate $g FAILED (exit $rc) in $2"
 	done
+	hud=$HUD_GATE
+	if [ "$3" = trusted ] && git -C "$ROOT" cat-file -e "HEAD:$HUD_GATE" 2>/dev/null; then
+		hud=.hud_gate_head.mjs
+		git -C "$ROOT" show "HEAD:$HUD_GATE" >"$1/$hud" || fail "cannot read $HUD_GATE from HEAD"
+	fi
+	[ -f "$1/$hud" ] || fail "gate $HUD_GATE missing in $2"
+	echo "pre-push: [$2] $HUD_GATE ($([ "$hud" = "$HUD_GATE" ] && echo own copy || echo code from HEAD))" >&2
+	# cd + relative paths only: native node.exe cannot open MSYS /c/... or /tmp/... paths.
+	# Reports must NEVER land in the served site/export tree; the gate chooses external scratch.
+	(cd "$1" && node "$hud" --quiet --site .) >&2
+	rc=$?
+	[ "$rc" -eq 0 ] || fail "gate $HUD_GATE FAILED (exit $rc; 1=layout defect, 2=incomplete/no browser) in $2"
 }
 
-TMP=$(mktemp -d 2>/dev/null) || fail "mktemp failed"
+# Resolve scratch in native Python: MSYS mktemp otherwise ignores Hermes' C: scratch.
+TMP=$("$PY" -c "import os,tempfile,pathlib; h=os.environ.get('HERMES_HOME'); d=pathlib.Path(h)/'cache'/'scratch' if h else pathlib.Path(tempfile.gettempdir()); d.mkdir(parents=True,exist_ok=True); print(pathlib.Path(tempfile.mkdtemp(prefix='eog-push-',dir=d)).as_posix(),end='')") || fail "scratch creation failed"
 [ -n "$TMP" ] && [ -d "$TMP" ] || fail "mktemp failed"
 trap 'rm -rf "$TMP"' EXIT
 trap 'exit 1' HUP INT TERM
@@ -70,8 +91,9 @@ else
 		# redirect, not -o: native git.exe on Windows cannot open an MSYS /c/... path
 		git -C "$ROOT" archive --format=tar "$lsha" >"$TMP/$short.tar" ||
 			fail "git archive of $lsha failed"
-		tar -xf "$TMP/$short.tar" -C "$dir" || fail "cannot extract $lsha"
-		run_gates "$dir" "commit $short ($lref)"
+		# stdin avoids GNU tar treating a native Windows C: archive path as a remote host.
+		tar -xf - -C "$dir" <"$TMP/$short.tar" || fail "cannot extract $lsha"
+		run_gates "$dir" "commit $short ($lref)" trusted
 		checked=$((checked + 1))
 	done
 fi

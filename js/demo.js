@@ -611,11 +611,7 @@
     dpr = Math.min(window.devicePixelRatio || 1, 2);
     if (vw * vh * dpr * dpr > 4.2e6) dpr = Math.max(1, Math.sqrt(4.2e6 / (vw * vh)));
     canvas.width = Math.round(vw * dpr); canvas.height = Math.round(vh * dpr);
-    HUD_TOP = vw <= 640 ? 76 : 48;
-    var availH = vh - HUD_TOP - 8;
-    cam.s = Math.min(vw / (WW + 16), availH / (WH + 8));
-    cam.ox = (vw - WW * cam.s) / 2;
-    cam.oy = HUD_TOP + (availH - WH * cam.s) / 2;
+    layoutCam();
     stars = [];
     var n = Math.round(vw * vh / 5000);
     for (var i = 0; i < n; i++) stars.push({ x: rand() * vw, y: rand() * vh, r: rand() < 0.1 ? 1.6 : 0.8, tw: rand() * 6.28 });
@@ -629,6 +625,24 @@
     holoCache = null;
   }
   window.addEventListener('resize', resize);
+  /* the station sits below the HUD's MEASURED bottom (it wraps to 2-3 rows on narrow/short screens);
+     --hud-h lets the CSS open cards below it too. Camera-only: no rand() here, the seeded stars stay put. */
+  var hudEl = document.querySelector('.hud');
+  function layoutCam() {
+    var hb = hudEl ? Math.ceil(hudEl.getBoundingClientRect().bottom) : 0;
+    HUD_TOP = hb > 0 ? hb : (vw <= 640 ? 76 : 48);
+    document.documentElement.style.setProperty('--hud-h', HUD_TOP + 'px');
+    var availH = vh - HUD_TOP - 8;
+    cam.s = Math.min(vw / (WW + 16), availH / (WH + 8));
+    cam.ox = (vw - WW * cam.s) / 2;
+    cam.oy = HUD_TOP + (availH - WH * cam.s) / 2;
+    staticDirty = true;
+    PROPS.forEach(function (p) { p.cache = null; });
+    holoCache = null;
+  }
+  if (hudEl && window.ResizeObserver) {
+    new ResizeObserver(function () { if (vw && Math.ceil(hudEl.getBoundingClientRect().bottom) !== HUD_TOP) layoutCam(); }).observe(hudEl);
+  }
 
   function toScreen(x, y) { return { x: cam.ox + x * cam.s, y: cam.oy + y * cam.s }; }
   function toWorld(sx, sy) { return { x: (sx - cam.ox) / cam.s, y: (sy - cam.oy) / cam.s }; }

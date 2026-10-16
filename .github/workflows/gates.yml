@@ -28,6 +28,22 @@ jobs:
       - name: check_paid_exit.py
         run: python check_paid_exit.py
 
+  hud:
+    # Responsive HUD in a real headless Chrome (preinstalled on ubuntu-latest), 14 pinned
+    # viewports, loopback-only; then the mutation proof that the gate can actually fail.
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0   # the mutation proof reads the pre-fix CSS from history
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+      - name: check_responsive_hud.mjs
+        run: node check_responsive_hud.mjs --quiet
+      - name: _verify_responsive_hud.mjs (gate fails on known-bad trees)
+        run: node _verify_responsive_hud.mjs
+
   live:
     # Post-deploy: does https://mrjcarrazco.github.io/eog/ serve the bytes at this commit?
     if: github.event_name == 'push' || github.event_name == 'workflow_dispatch'
