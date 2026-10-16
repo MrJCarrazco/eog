@@ -39,6 +39,8 @@ jobs:
       - uses: actions/setup-node@v4
         with:
           node-version: '24'
+      - name: _verify_hud_lifecycle.mjs (fault-injected profile cleanup)
+        run: node --test _verify_hud_lifecycle.mjs
       - name: check_responsive_hud.mjs
         run: node check_responsive_hud.mjs --quiet
       - name: _verify_responsive_hud.mjs (gate fails on known-bad trees)

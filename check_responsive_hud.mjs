@@ -161,17 +161,14 @@ async function launch(chrome) {
     '--metrics-recording-only', '--hide-scrollbars', '--mute-audio', '--force-device-scale-factor=1',
     '--host-resolver-rules=MAP * ~NOTFOUND, EXCLUDE 127.0.0.1', 'about:blank'];
   if (process.platform === 'linux') args.unshift('--no-sandbox'); // CI runners restrict userns sandboxing
-  const proc = spawn(chrome, args, { stdio: 'ignore', env: { ...process.env, TEMP: scratchRoot(), TMP: scratchRoot(), TMPDIR: scratchRoot() } });
-  let died = null;
-  proc.on('exit', (c) => { died = c; });
-  proc.on('error', (e) => { died = e.message; });
+  let proc = null, died = null;
   let cdp = null, cleaning = null;
   const cleanup = () => cleaning ||= (async () => {
     if (cdp) {
       try { await Promise.race([cdp.send('Browser.close'), sleep(1500)]); } catch {}
       cdp.close();
     }
-    if (proc.exitCode === null && proc.pid) {
+    if (proc && proc.exitCode === null && proc.pid) {
       try {
         if (process.platform === 'win32') execFileSync('taskkill', ['/T', '/F', '/PID', String(proc.pid)], { stdio: 'ignore', timeout: 5000 });
         else proc.kill('SIGKILL');
@@ -184,6 +181,10 @@ async function launch(chrome) {
   const previousCleanup = emergencyCleanup;
   emergencyCleanup = async () => { await cleanup(); await previousCleanup(); };
   try {
+  // Register cleanup before spawn: resource exhaustion can throw synchronously.
+  proc = spawn(chrome, args, { stdio: 'ignore', env: { ...process.env, TEMP: scratchRoot(), TMP: scratchRoot(), TMPDIR: scratchRoot() } });
+  proc.on('exit', (c) => { died = c; });
+  proc.on('error', (e) => { died = e.message; });
   const portFile = path.join(profile, 'DevToolsActivePort');
   const lines = await until(() => {
     if (died !== null) throw new Incomplete('browser exited at launch (' + died + ')');
