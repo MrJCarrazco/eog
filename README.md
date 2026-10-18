@@ -8,9 +8,9 @@ pixel-art demo — no backend, no API key, no network calls.
 - Play & tip on itch.io: https://mrjcarrazco.itch.io/empire-of-gods
 - Devlog: https://mrjcarrazco.itch.io/empire-of-gods/devlog
 
-The full version wires the crew up to a real LLM via your own API key, so the
-gods actually think instead of running a scripted loop — MIT licensed, source
-in this repo.
+The free game here is scripted and open source (MIT code); no API key or LLM
+integration is included. AI Crew Engine is a $19 drop-in HTML template with the
+13-NPC crew and pure-Python pixel-art generator: https://mrjcarrazco.gumroad.com/l/rqaxx
 
 ## Tech
 

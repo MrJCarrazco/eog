@@ -267,6 +267,128 @@ def check_sprite_sensor_honest(html, js):
         return '; '.join(why)
 
 
+def check_template_claims(html, js):
+    """Bounded exact visible-copy policy, not a full product truth certificate.
+
+    Parse actual elements; comments and hidden replacement text cannot satisfy
+    the policy. #upsell itself is intentionally hidden until opened by gameplay.
+    README is deliberately outside this release gate (absent from itch ZIPs).
+    """
+    from html.parser import HTMLParser
+
+    class Node:
+        def __init__(self, tag, attrs, parent=None):
+            self.tag, self.attrs, self.parent = tag, dict(attrs), parent
+            self.children = []
+            self.parts = []
+            self.duplicate_attrs = len(attrs) != len(self.attrs)
+
+    class Tree(HTMLParser):
+        def __init__(self):
+            super().__init__(convert_charrefs=True)
+            self.root = Node('root', [])
+            self.stack = [self.root]
+            self.nodes = []
+
+        def handle_starttag(self, tag, attrs):
+            node = Node(tag, attrs, self.stack[-1])
+            self.stack[-1].children.append(node)
+            self.stack[-1].parts.append(node)
+            self.nodes.append(node)
+            if tag not in {'area', 'base', 'br', 'col', 'embed', 'hr', 'img',
+                           'input', 'link', 'meta', 'param', 'source', 'track', 'wbr'}:
+                self.stack.append(node)
+
+        def handle_endtag(self, tag):
+            for i in range(len(self.stack) - 1, 0, -1):
+                if self.stack[i].tag == tag:
+                    del self.stack[i:]
+                    break
+
+        def handle_startendtag(self, tag, attrs):
+            self.handle_starttag(tag, attrs)
+            self.handle_endtag(tag)
+
+        def handle_data(self, data):
+            self.stack[-1].parts.append(data)
+
+    try:
+        tree = Tree()
+        tree.feed(html.decode('utf-8'))
+        tree.close()
+    except (UnicodeError, ValueError) as exc:
+        return 'template HTML parse failed: %s' % exc
+
+    fields = {}
+    for aid, tag in [('btn-full', 'button'), ('upsell', 'div'),
+                     ('upsell-title', 'div')]:
+        matches = [n for n in tree.nodes if n.attrs.get('id') == aid]
+        if len(matches) != 1 or matches[0].tag != tag:
+            return '#%s must be one unique <%s>' % (aid, tag)
+        fields[aid] = matches[0]
+    button, modal, title = (fields[k] for k in ('btn-full', 'upsell', 'upsell-title'))
+    for node, classes in [(button, 'hud-btn accent'), (modal, 'upsell'),
+                          (title, 'upsell-title')]:
+        if node.attrs.get('class', '').split() != classes.split():
+            return 'protected element class drift'
+    if button.attrs.get('type') != 'button':
+        return '#btn-full must have type="button"'
+    if modal.attrs.get('role') != 'dialog' or modal.attrs.get('aria-labelledby') != 'upsell-title':
+        return '#upsell must be the labelled dialog'
+    if title.parent is not modal:
+        return '#upsell-title must belong to #upsell'
+    def inside(node, parent):
+        while node.parent is not None:
+            node = node.parent
+            if node is parent:
+                return True
+        return False
+
+    paragraphs = [n for n in tree.nodes if n.tag == 'p' and inside(n, modal)]
+    if (len(paragraphs) != 2 or paragraphs[0].attrs.get('class', '')
+            or any(n.parent is not modal for n in paragraphs)
+            or paragraphs[1].attrs.get('class', '').split() != ['upsell-free']):
+        return '#upsell must contain the first two copy paragraphs (second .upsell-free)'
+
+    def unsafe(node):
+        # Deliberately conservative: inline styling is outside this copy policy.
+        return (node.duplicate_attrs or node.tag in {'script', 'style', 'template', 'noscript'}
+                or any(k in node.attrs for k in ('hidden', 'inert', 'style'))
+                or node.attrs.get('aria-hidden', '').lower() == 'true')
+
+    def content(node):
+        if unsafe(node):
+            raise ValueError('hidden/non-visible substitute')
+        for child in node.children:
+            if child.tag not in {'b', 'strong', 'em', 'i', 'span'} or child.attrs:
+                raise ValueError('unsupported inline copy markup')
+        return ''.join(p if isinstance(p, str) else content(p) for p in node.parts)
+
+    expected = [
+        (button, 'ABOUT THE TEMPLATE'),
+        (title, 'A SCRIPTED CREW FOR YOUR SITE'),
+        (paragraphs[0], 'This demo runs on a script: authored banter, dialogue trees and station events. No API key or LLM integration is included.'),
+        (paragraphs[1], 'The game is free & open source (MIT code). AI Crew Engine is a $19 drop-in HTML template with the 13-NPC crew and the pure-Python pixel-art generator.'),
+    ]
+    for node, copy in expected:
+        ancestor = node.parent
+        while ancestor is not None:
+            # Only the normal modal hidden attribute is allowed on this ancestor.
+            attrs = ancestor.attrs
+            if ancestor is modal:
+                attrs = {k: v for k, v in attrs.items() if k != 'hidden'}
+            probe = Node(ancestor.tag, list(attrs.items()))
+            if ancestor.duplicate_attrs or unsafe(probe):
+                return 'protected copy has a hidden ancestor'
+            ancestor = ancestor.parent
+        try:
+            actual = ' '.join(content(node).split())
+        except ValueError as exc:
+            return str(exc)
+        if actual != copy:
+            return 'protected template copy missing or changed: %s' % copy
+
+
 # (name, check, live) - live checks see index.html with <!-- comments --> removed,
 # so a commented-out tag or a comment naming a directive can neither pass nor fail them.
 CHECKS = [
@@ -281,6 +403,7 @@ CHECKS = [
     ('9 itch engagement exit in #upsell', check_engagement_exit, True),
     ('10 sprite sensor cannot fake completion', check_sprite_sensor_honest, False),
     ('11 itch referrer attribution pinned', check_itch_referrer_attribution, True),
+    ('12 scripted template claims in primary fields', check_template_claims, True),
 ]
 
 
