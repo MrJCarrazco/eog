@@ -95,7 +95,7 @@ html, body { margin: 0; height: 100%; overflow: hidden; background: #03060d; col
 }
 
 .toast {
-  position: fixed; top: 58px; left: 50%; transform: translateX(-50%); z-index: 8;
+  position: fixed; top: calc(var(--hud-h, 56px) + 8px); left: 50%; transform: translateX(-50%); z-index: 8;
   background: var(--panel); border: 1px solid var(--gold); color: var(--ink); border-radius: 4px;
   padding: 6px 14px; font-size: 20px; max-width: 90vw; text-align: center;
 }
@@ -239,4 +239,30 @@ html, body { margin: 0; height: 100%; overflow: hidden; background: #03060d; col
   .feed li { font-size: 16px; }
   .feed li:nth-last-child(n+3) { display: none; }
   .feed .hint { display: none; }
+}
+
+/* ---------- keyboard crew comms (R-EOG35): native select + TALK in the feed header ----------
+   Same row as CREW COMMS (the hint shrinks first, the visible title drops on small screens -
+   the aside keeps the accessible name); the message list shows one line fewer so the panel
+   does not grow past its old bounds. Not part of the HUD. */
+.sr-only { position: absolute; width: 1px; height: 1px; margin: -1px; padding: 0; border: 0; overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; }
+.feed-head { display: flex; align-items: center; gap: 6px; }
+.feed-title { flex: none; }
+.feed .hint { flex: 0 100 auto; min-width: 0; overflow: hidden; white-space: nowrap; text-overflow: ellipsis; }
+.feed-ctl {
+  font-family: var(--font); font-size: 16px; letter-spacing: 1px; color: var(--ink); background: var(--panel);
+  border: 1px solid var(--edge); border-radius: 3px; min-height: 32px; padding: 2px 6px;
+}
+#crew-select { flex: 1 1 auto; min-width: 0; cursor: pointer; }
+#crew-select option { background: #08101e; color: var(--ink); }
+#btn-talk { flex: none; min-width: 48px; cursor: pointer; border-color: var(--cyan); color: var(--cyan); }
+.feed-ctl:hover { border-color: var(--cyan); color: #fff; }
+.feed-ctl:focus-visible { outline: 2px solid var(--gold); outline-offset: 1px; }
+.feed li:nth-last-child(n+4) { display: none; }
+@media (max-width: 640px) {
+  .feed-title { display: none; }
+  .feed li:nth-last-child(n+3) { display: none; }
+}
+@media (max-height: 500px) {
+  .feed-title { display: none; }
 }

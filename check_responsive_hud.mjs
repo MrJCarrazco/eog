@@ -43,6 +43,12 @@ const VIEWPORTS = [
   [1024, 768], [1280, 800], [1440, 900], [1920, 1080], [568, 320], [740, 360], [844, 390],
 ];
 const CONTROLS = ['demo-badge', 'btn-share', 'link-itch', 'link-buy-hud', 'btn-full'];
+// Keyboard crew comms (R-EOG35): in the feed, NOT the HUD - same visible/hit/font/target limits,
+// excluded from the HUD overlap and HUD-height checks.
+const COMMS = ['crew-select', 'btn-talk'];
+const MIN_TALK_W = 48;
+const MAX_TABS = 30;      // real Tab presses allowed to reach the roster from wherever focus is
+const ROSTER_VP = '1920x1080'; // every one of the 13 gods is opened by keyboard here
 // Exact paid exits (raw attribute values). A drift here is a gate failure, not a test update.
 const PAID_HUD = 'https://mrjcarrazco.gumroad.com/l/rqaxx?utm_source=eog_demo&utm_medium=hud';
 const PAID_UPSELL = 'https://mrjcarrazco.gumroad.com/l/rqaxx?utm_source=eog_demo&utm_medium=upsell';
@@ -323,6 +329,26 @@ async function run(opts) {
     fs.writeFileSync(path.join(opts.out, name + '.png'), Buffer.from(data, 'base64'));
   };
   const trap = () => ev(() => window.__hudTrap.splice(0));
+  // Real key presses (Input.dispatchKeyEvent): never .click()/.focus() for the keyboard proofs.
+  const KEYS = { Tab: [9, 'Tab'], Enter: [13, 'Enter', '\r'], ' ': [32, 'Space', ' '], ArrowDown: [40, 'ArrowDown'], ArrowUp: [38, 'ArrowUp'], Escape: [27, 'Escape'] };
+  const key = async (k, shift) => {
+    const [vk, code, text] = KEYS[k];
+    const base = { key: k, code, windowsVirtualKeyCode: vk, nativeVirtualKeyCode: vk, modifiers: shift ? 8 : 0 };
+    await S('Input.dispatchKeyEvent', Object.assign({ type: text ? 'keyDown' : 'rawKeyDown' }, base, text ? { text, unmodifiedText: text } : {}));
+    await S('Input.dispatchKeyEvent', Object.assign({ type: 'keyUp' }, base));
+    await sleep(40);
+  };
+  const focusInfo = () => ev(() => {
+    const a = document.activeElement, sel = document.getElementById('crew-select');
+    const dc = [...document.querySelectorAll('#dlg-choices .choice')], ec = [...document.querySelectorAll('#ev-choices .choice')];
+    return { id: (a && a.id) || (a && a.tagName) || null, dlgChoice: dc.indexOf(a), dlgN: dc.length, evChoice: ec.indexOf(a),
+      sel: sel ? sel.value : null, selIdx: sel ? sel.selectedIndex : -1 };
+  });
+  const tabTo = async (id) => {
+    for (let n = 1; n <= MAX_TABS; n++) { await key('Tab'); if ((await focusInfo()).id === id) return n; }
+    return 0;
+  };
+  const dlgOpen = () => ev(() => !document.getElementById('dialog').hidden);
   const rows = new Map(VIEWPORTS.map(([w, h]) => [w + 'x' + h, { vp: w + 'x' + h }]));
   report.viewports = [...rows.values()];
   try {
@@ -369,6 +395,9 @@ async function run(opts) {
     /* pass 1: a REAL station event (game timing untouched: first fires ~20 s after boot) on every
        viewport, then resolved by a real click on its choice so the HUD pass runs uncovered. */
     await until(() => ev(() => !!__eogdemo.stats().eventActive), 40000, 'first station event');
+    // Keyboard TALK while that event is live: refused with a visible status, no dialogue, no stat
+    // increment, focus handed to the event's first choice (restore is checked after it resolves).
+    const refusal = await keyboardRefusal();
     // A loaded machine can outlast the game's 30 s event timeout: then wait for the NEXT real event.
     for (const [w, h] of VIEWPORTS) {
       const vp = w + 'x' + h;
@@ -396,6 +425,15 @@ async function run(opts) {
       const ok = await until(() => ev((n) => __eogdemo.stats().eventsResolved > n, before), 3000, 'event resolve').catch(() => false);
       if (!ok) fail(VIEWPORTS[VIEWPORTS.length - 1].join('x'), 'real click on the event choice did not resolve the event');
     }
+    if (refusal) {
+      const s = await ev(() => __eogdemo.stats());
+      // only provable when the event that took focus is the one just resolved (not a later one)
+      if (!s.eventActive && s.eventsFired === refusal.eventsFired) {
+        const f = await focusInfo();
+        report.refusalRestore = f.id;
+        if (f.id !== 'btn-talk') fail('', `keyboard: focus did not return to #btn-talk after the event that took it resolved (on ${f.id})`);
+      } else report.refusalRestore = 'not observable (event replaced or unresolved)';
+    }
     say(`event card checked on ${VIEWPORTS.length} viewports`);
 
     /* pass 2: HUD, gameplay, dialog, paid clicks, upsell - per viewport. The next event is >= 45 s
@@ -422,6 +460,7 @@ async function run(opts) {
       }
     }
     await settleEvent();
+    await keyboardEventOverDialogue();
   } finally {
     report.outbound = outbound; report.strayTargets = strayTargets;
     await cleanup();
@@ -500,6 +539,7 @@ async function run(opts) {
         if (!open) fail(vp, `clicking god ${god.id} at ${god.x},${god.y} did not open the dialog (3 attempts)`);
         else {
           await until(() => ev(() => document.querySelectorAll('#dlg-choices .choice').length > 0), 3000, 'dialog choices');
+          if (await ev(() => document.getElementById('dialog').contains(document.activeElement))) fail(vp, 'pointer-opened dialog pulled focus into the card (pointer path must stay unchanged)');
           const d = await ev(pagePanel, '#dialog', ['.dialog-x', '.choice']);
           row.dialog = d;
           if (d.rect.y < d.hudBottom - TOL) fail(vp, `dialog top ${d.rect.y} is under the HUD (bottom ${Math.round(d.hudBottom)})`);
@@ -547,8 +587,165 @@ async function run(opts) {
           }
         }
       }
+      // Keyboard crew comms: geometry (feed, not HUD), exact roster, then a real Tab/Arrow/Enter|Space walk.
+      const k = await ev(pageMeasure, COMMS);
+      row.comms = k.controls;
+      for (const id of COMMS) {
+        const c = k.controls[id];
+        if (!c) { fail(vp, `#${id} MISSING from the DOM`); continue; }
+        if (!c.shown) { fail(vp, `#${id} not visible (${c.why})`); continue; }
+        if (!c.inside) fail(vp, `#${id} OFFSCREEN/clipped rect=${JSON.stringify(c.rect)}`);
+        if (c.rect.w < MIN_TARGET || c.rect.h < MIN_TARGET) fail(vp, `#${id} target ${c.rect.w}x${c.rect.h} < ${MIN_TARGET}x${MIN_TARGET}`);
+        if (!c.hitOk) fail(vp, `#${id} centre is covered by "${c.hitWhat}" (elementFromPoint)`);
+        if (c.font < MIN_FONT) fail(vp, `#${id} font ${c.font}px < ${MIN_FONT}px`);
+      }
+      if (k.controls['btn-talk'] && k.controls['btn-talk'].rect.w < MIN_TALK_W) fail(vp, `#btn-talk width ${k.controls['btn-talk'].rect.w} < ${MIN_TALK_W}`);
+      const roster = await ev(() => {
+        const sel = document.getElementById('crew-select');
+        const cast = ((window.EOG_BANTER && EOG_BANTER.cast) || []).map((c) => [c.id, c.name.toUpperCase()]);
+        const opts = sel ? [...sel.options].map((o) => [o.value, o.textContent]) : [];
+        return { cast, opts };
+      });
+      if (roster.opts.length !== 13 || JSON.stringify(roster.opts) !== JSON.stringify(roster.cast)) fail(vp, `#crew-select roster != the 13-god cast (${JSON.stringify(roster.opts.map((o) => o[0]))})`);
+      if (k.controls['crew-select'] && k.controls['btn-talk']) {
+        row.keyboard = await keyboardTalk(vp, VIEWPORTS.findIndex(([a, b]) => a === w && b === h) % 2 === 1);
+        if (vp === ROSTER_VP) row.roster = await keyboardRoster(vp, roster.cast.map((c) => c[0]));
+      }
       const n = failures.filter((f) => f.startsWith(vp + ' ')).length;
       return `${n ? 'FAIL' : 'ok  '} ${vp.padEnd(9)} hud=${Math.round(m.hudBottom)}px gods clear ${clear.length}/13${n ? '  (' + n + ' issue' + (n > 1 ? 's' : '') + ')' : ''}`;
+  }
+
+  // Tab to the roster, Arrow changes the selection (and opens nothing), Tab to TALK, Enter/Space opens
+  // THAT god's existing dialogue with focus on its first choice; Tab + Enter advances to the next node
+  // with focus on its first choice; Escape closes and returns focus to TALK.
+  async function keyboardTalk(vp, useSpace) {
+    const r = { key: useSpace ? 'Space' : 'Enter' };
+    try {
+      r.tabs = await tabTo('crew-select');
+      if (!r.tabs) { fail(vp, `keyboard: ${MAX_TABS} real Tab presses never reached #crew-select`); return r; }
+      const f0 = await focusInfo(), s0 = await ev(() => __eogdemo.stats());
+      const dir = f0.selIdx < 12 ? 'ArrowDown' : 'ArrowUp';
+      await key(dir);
+      const f1 = await focusInfo(), s1 = await ev(() => __eogdemo.stats());
+      if (f1.id !== 'crew-select' || f1.selIdx !== f0.selIdx + (dir === 'ArrowDown' ? 1 : -1)) fail(vp, `keyboard: ${dir} on #crew-select did not move the selection (${f0.selIdx} -> ${f1.selIdx}, focus ${f1.id})`);
+      if (s1.dialogOpen || s1.dialogsOpened !== s0.dialogsOpened) fail(vp, 'keyboard: changing #crew-select opened a dialogue (select must only select)');
+      r.god = f1.sel;
+      await key('Tab');
+      if ((await focusInfo()).id !== 'btn-talk') { fail(vp, 'keyboard: Tab from #crew-select did not reach #btn-talk'); return r; }
+      await key(useSpace ? ' ' : 'Enter');
+      const opened = await until(() => ev((g) => __eogdemo.stats().dialogGod === g, f1.sel), 2000, 'keyboard dialogue').catch(() => false);
+      if (!opened) { fail(vp, `keyboard: ${r.key} on #btn-talk did not open ${f1.sel}'s dialogue`); return r; }
+      if ((await ev(() => __eogdemo.stats().dialogsOpened)) !== s0.dialogsOpened + 1) fail(vp, 'keyboard: TALK did not count exactly one dialogue');
+      let f = await focusInfo();
+      if (f.dlgChoice !== 0) { fail(vp, `keyboard: first dialogue choice not focused after TALK (focus ${f.id})`); return r; }
+      if (f.dlgN < 2) { fail(vp, `keyboard: ${f1.sel} start node has ${f.dlgN} choice(s), need 2 to prove Tab`); return r; }
+      await key('Tab');
+      if ((await focusInfo()).dlgChoice !== 1) { fail(vp, 'keyboard: native Tab did not move from choice 1 to choice 2'); return r; }
+      const c0 = await ev(() => __eogdemo.stats().choicesMade);
+      await key('Enter');
+      const advanced = await until(() => ev((n) => __eogdemo.stats().choicesMade > n, c0), 1500, 'keyboard choice').catch(() => false);
+      if (!advanced) { fail(vp, 'keyboard: Enter on a dialogue choice did not advance the dialogue'); return r; }
+      f = await focusInfo();
+      if (!(await dlgOpen()) || f.dlgChoice !== 0) fail(vp, `keyboard: focus not on the next node's first choice (focus ${f.id})`);
+      await key('Escape');
+      const closed = await until(() => ev(() => document.getElementById('dialog').hidden), 1500, 'keyboard close').catch(() => false);
+      if (!closed) fail(vp, 'keyboard: Escape did not close the dialogue');
+      else if ((f = await focusInfo()).id !== 'btn-talk') fail(vp, `keyboard: focus not restored to #btn-talk after Escape (on ${f.id})`);
+      r.ok = true;
+      return r;
+    } finally {
+      if (await dlgOpen()) await key('Escape'); // never leave a card over the next viewport's measure
+    }
+  }
+
+  // All 13 roster identities by keyboard (from #btn-talk): Shift+Tab, Arrow, Tab, Enter, Escape.
+  // God 1 also proves: Escape on the select leaves the open dialogue alone, and TALK over an open
+  // dialogue switches cleanly (focus lands once on the new first choice).
+  async function keyboardRoster(vp, ids) {
+    const seen = [];
+    try {
+      await key('Tab', true);
+      let f = await focusInfo();
+      if (f.id !== 'crew-select') { fail(vp, `roster: Shift+Tab from #btn-talk did not reach #crew-select (${f.id})`); return seen; }
+      for (let n = 0; n < 13 && f.selIdx > 0; n++) { await key('ArrowUp'); f = await focusInfo(); }
+      for (let i = 0; i < ids.length; i++) {
+        if (i) { await key('ArrowDown'); f = await focusInfo(); }
+        if (f.selIdx !== i || f.sel !== ids[i]) { fail(vp, `roster: selection ${f.selIdx}/${f.sel}, wanted ${i}/${ids[i]}`); return seen; }
+        await key('Tab');
+        if ((await focusInfo()).id !== 'btn-talk') { fail(vp, 'roster: Tab did not reach #btn-talk'); return seen; }
+        await key('Enter');
+        if (!(await until(() => ev((g) => __eogdemo.stats().dialogGod === g, ids[i]), 2000, 'roster dialogue').catch(() => false))) { fail(vp, `roster: ${ids[i]} did not open by keyboard`); return seen; }
+        if ((await focusInfo()).dlgChoice !== 0) fail(vp, `roster: ${ids[i]} first choice not focused`);
+        if (i === 0) {
+          for (let n = 0; n < 4 && (await focusInfo()).id !== 'crew-select'; n++) await key('Tab', true);
+          if ((await focusInfo()).id !== 'crew-select') fail(vp, 'roster: Shift+Tab from the dialogue never reached #crew-select');
+          else {
+            await key('Escape');
+            if (!(await dlgOpen())) fail(vp, 'roster: Escape on #crew-select closed the unrelated dialogue');
+            await key('Tab');
+            const before = await ev(() => __eogdemo.stats().dialogsOpened);
+            await key('Enter'); // TALK over the open card: switch, no double restore
+            await sleep(60);
+            const s = await ev(() => __eogdemo.stats());
+            if (!s.dialogOpen || s.dialogGod !== ids[0] || s.dialogsOpened !== before + 1 || (await focusInfo()).dlgChoice !== 0) fail(vp, 'roster: TALK over an open dialogue did not switch with focus on the new first choice');
+          }
+        }
+        seen.push((await ev(() => __eogdemo.stats())).dialogGod);
+        await key('Escape');
+        if ((await focusInfo()).id !== 'btn-talk') fail(vp, `roster: focus not back on #btn-talk after closing ${ids[i]}`);
+        await key('Tab', true);
+        f = await focusInfo();
+      }
+      if (JSON.stringify(seen) !== JSON.stringify(ids)) fail(vp, `roster: keyboard opened ${JSON.stringify(seen)} != cast ${JSON.stringify(ids)}`);
+      return seen;
+    } finally {
+      if (await dlgOpen()) await key('Escape');
+    }
+  }
+
+  // During the first live event: Tab to TALK, Enter -> refusal status, no dialogue/stat, focus on event choice 1.
+  async function keyboardRefusal() {
+    const s0 = await ev(() => __eogdemo.stats());
+    const tabs = await tabTo('btn-talk');
+    if (!tabs) { fail('', `keyboard: ${MAX_TABS} real Tab presses never reached #btn-talk`); return null; }
+    await key('Enter');
+    await sleep(80);
+    const s1 = await ev(() => __eogdemo.stats()), f = await focusInfo();
+    const status = await ev(() => { const t = document.getElementById('toast'); return t && !t.hidden && t.getAttribute('role') === 'status' ? t.textContent : null; });
+    if (!s1.eventActive || s1.eventsFired !== s0.eventsFired) {
+      if (s1.dialogOpen) await key('Escape');
+      throw new Incomplete('the first station event ended before the keyboard TALK refusal could be checked');
+    }
+    report.refusal = { tabs, status, focus: f.id, evChoice: f.evChoice };
+    if (s1.dialogOpen || s1.dialogsOpened !== s0.dialogsOpened) fail('', 'keyboard: TALK during a station event opened/counted a dialogue');
+    if (!status) fail('', 'keyboard: TALK during a station event gave no visible role=status refusal');
+    if (f.evChoice !== 0) fail('', `keyboard: TALK during a station event did not hand focus to the first event choice (on ${f.id})`);
+    // the status must not sit over the event card the viewport pass measures next
+    await until(() => ev(() => document.getElementById('toast').hidden), 6000, 'refusal status to clear');
+    return { eventsFired: s1.eventsFired };
+  }
+
+  // A REAL event firing over a keyboard-focused dialogue takes focus to its first choice; resolving it
+  // by keyboard returns focus to the still-open dialogue. Waits for the next real event (timing untouched).
+  async function keyboardEventOverDialogue() {
+    const vp = 'event-over-dialogue';
+    try {
+      if (!(await tabTo('btn-talk'))) { fail(vp, `${MAX_TABS} real Tab presses never reached #btn-talk`); return; }
+      await key('Enter');
+      if (!(await until(dlgOpen, 2000, 'keyboard dialogue').catch(() => false)) || (await focusInfo()).dlgChoice !== 0) { fail(vp, 'keyboard dialogue did not open with focus on choice 1'); return; }
+      const r0 = await ev(() => __eogdemo.stats().eventsResolved);
+      await until(() => ev(() => !!__eogdemo.stats().eventActive), 100000, 'a station event over the dialogue');
+      await sleep(80);
+      let f = await focusInfo();
+      if (f.evChoice !== 0) { fail(vp, `event did not take focus from the keyboard dialogue (on ${f.id})`); return; }
+      await key('Enter');
+      if (!(await until(() => ev((n) => __eogdemo.stats().eventsResolved > n, r0), 2000, 'keyboard event resolve').catch(() => false))) { fail(vp, 'Enter on the event choice did not resolve it'); return; }
+      f = await focusInfo();
+      if (!(await dlgOpen()) || f.dlgChoice !== 0) fail(vp, `focus not restored to the open dialogue after the event (on ${f.id})`);
+      report.eventOverDialogue = f.id || f.dlgChoice;
+    } finally {
+      if (await dlgOpen()) await key('Escape');
+    }
   }
 }
 

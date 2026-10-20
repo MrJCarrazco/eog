@@ -480,6 +480,9 @@
       evChoices.appendChild(btn);
     });
     evEl.hidden = false;
+    evFocusBack = null;
+    // a keyboard player inside a dialogue would otherwise be stranded behind the event card
+    if (dlg && dlgEl.contains(document.activeElement)) handEventFocus(document.activeElement);
     feed('Station', '#ffb02e', ev.text, true);
     if (lead && lead.loaded && !lead.inDialog) {
       lead.emote = { start: now, until: now + 1100 };
@@ -496,8 +499,22 @@
     var lead = byId[activeEvent.ev.who];   // an off-shift lead god goes back to their nap
     if (lead && !lead.inDialog && (dayInfo.night ? !NIGHT_OWLS[lead.id] : !!NIGHT_OWLS[lead.id])) bedtime(lead, clock.now);
     activeEvent = null;
+    var back = evFocusBack, owned = evEl.contains(document.activeElement);
+    evFocusBack = null;
     evEl.hidden = true;
     eventAt = clock.now + rnd(EVENT_MIN, EVENT_MAX);
+    // give focus back only if the event still holds it (the player may have tabbed elsewhere)
+    if (back && owned) {
+      if (back === btnTalk) btnTalk.focus();
+      else if (dlg) (dlgEl.contains(back) ? back : (dlgChoices.querySelector('.choice') || btnTalk)).focus();
+    }
+  }
+  var evFocusBack = null;   // where focus returns after an event that took it from the player
+  function handEventFocus(back) {
+    var first = evChoices.querySelector('.choice');
+    if (!first) return;
+    evFocusBack = back;
+    first.focus();
   }
   function stepEvents(now) {
     if (activeEvent) {
@@ -520,9 +537,9 @@
   function moodLabel(m) {
     return 'MOOD ' + MOODS[m + 3] + ' ' + (m > 0 ? '+' + m : m);
   }
-  function openDialog(b, now) {
+  function openDialog(b, now, opener) {
     if (!b.loaded) { toast(b.cast.name + ' is still warping in...'); return; }
-    if (dlg) closeDialog(now);
+    if (dlg) closeDialog(now, true);
     var cv = convos.filter(function (c) { return c.ids.indexOf(b.id) >= 0; })[0];
     if (cv) endConvo(cv, now);
     var tree = DIALOGUE[b.id];
@@ -531,15 +548,15 @@
     b.inDialog = true; b.path = null; b.state = 'idle'; b.dir = 'south'; b.sleeping = false; b.goingToBed = false;
     b.emote = { start: now, until: now + 1050 };
     bubbles = bubbles.filter(function (x) { if (x.b === b) b.speaking = false; return x.b !== b; });
-    dlg = { b: b, tree: tree, wasAsleep: wasAsleep };
+    dlg = { b: b, tree: tree, wasAsleep: wasAsleep, opener: opener || null };   // opener: keyboard/roster path only
     dlgEl.style.borderLeftColor = b.cast.color;
     dlgName.textContent = b.cast.name.toUpperCase(); dlgName.style.color = b.cast.color;
     dlgTitle.textContent = b.cast.title;
     dlgEl.hidden = false;
     stats.dialogsOpened++;
-    showNode('start', now + 1000, wasAsleep);
+    showNode('start', now + 1000, wasAsleep, !!opener);
   }
-  function showNode(id, startAt, wasAsleep) {
+  function showNode(id, startAt, wasAsleep, focusFirst) {
     var node = dlg.tree[id];
     if (!node) { closeDialog(clock.now); return; }
     dlg.node = node;
@@ -557,6 +574,7 @@
       btn.addEventListener('click', function () { choose(ch); });
       dlgChoices.appendChild(btn);
     });
+    if (focusFirst && dlgChoices.firstChild) dlgChoices.firstChild.focus();
   }
   function choose(ch) {
     if (!dlg) return;
@@ -571,15 +589,18 @@
     stats.choicesMade++;
     var next = dlg.tree[ch.to];
     if (next) feed(b.cast.name, b.cast.color, next.text);
-    showNode(ch.to, now + (ch.mood > 0 ? 900 : 0));
+    var refocus = !!dlg.opener && dlgEl.contains(document.activeElement);
+    showNode(ch.to, now + (ch.mood > 0 ? 900 : 0), undefined, refocus);
   }
-  function closeDialog(now) {
+  function closeDialog(now, keepFocus) {
     if (!dlg) return;
-    var b = dlg.b;
+    var b = dlg.b, opener = dlg.opener, owned = dlgEl.contains(document.activeElement);
     b.inDialog = false; b.speaking = false; b.idleUntil = now + 1500;
     if ((dayInfo.night && !NIGHT_OWLS[b.id]) || (!dayInfo.night && NIGHT_OWLS[b.id])) bedtime(b, now);
     dlg = null;
     dlgEl.hidden = true;
+    // keyboard path: hand focus back to whoever opened the card, iff the card still held it
+    if (opener && owned && !keepFocus) (opener.isConnected && opener.getClientRects().length ? opener : btnTalk).focus();
   }
   dlgEl.querySelector('.dialog-x').addEventListener('click', function () { closeDialog(clock.now); });
   function stepDialog(now) {
@@ -1060,7 +1081,25 @@
     hover = bodyAt(e.clientX, e.clientY);
     canvas.style.cursor = hover ? 'pointer' : 'default';
   });
-  window.addEventListener('keydown', function (e) { if (e.key === 'Escape') closeDialog(clock.now); });
+  // Escape on the native select belongs to the select (closing its list), not to the dialogue card
+  window.addEventListener('keydown', function (e) { if (e.key === 'Escape' && e.target !== crewSel) closeDialog(clock.now); });
+
+  /* ---------- input: keyboard crew roster (CREW COMMS select + TALK) ---------- */
+  var crewSel = document.getElementById('crew-select'), btnTalk = document.getElementById('btn-talk');
+  BANTER.cast.forEach(function (c) {
+    if (!byId[c.id]) return;
+    var o = document.createElement('option');
+    o.value = c.id; o.textContent = c.name.toUpperCase();
+    crewSel.appendChild(o);
+  });
+  // choosing only selects; TALK (Enter / Space / click) opens the existing dialogue card
+  btnTalk.addEventListener('click', function () {
+    if (!stats.splashGone) return;
+    var b = byId[crewSel.value];
+    if (!b) return;
+    if (activeEvent) { toast('Station event first: make the call, then talk to ' + b.cast.name + '.'); handEventFocus(btnTalk); return; }
+    openDialog(b, clock.now, btnTalk);
+  });
 
   /* ---------- sprite streaming: nearest gods first ---------- */
   var perf = { t0: 0, first6Ms: null, allMs: null, settledMs: null, failed: 0, frameMs: 16.7, fpsSamples: [], dpr: 1 };

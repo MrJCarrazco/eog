@@ -92,8 +92,43 @@ def main():
     assert 'The full version wires' not in readme
     for name in ('index.html', 'README.md', 'check_paid_exit.py', '_verify_template_claims.py'):
         assert b'\r' not in (root / name).read_bytes(), name
-    # Copy-only HTML edits preserve every original tag, attribute, and order.
-    assert re.findall(rb'<[^>]+>', ORIGINAL) == re.findall(rb'<[^>]+>', current)
+    # R-EOG35 adds only these four independently reviewed input-layer HTML deltas.
+    # Project them back to the copy-only surface, then retain the original WHOLE-DOM
+    # equality assertion. An unknown/deleted/duplicated delta or any other tag drift
+    # still refuses; this is not a broad exclusion for the comms region.
+    html_deltas = [
+        (b'<aside id="feed" class="feed" aria-live="polite">',
+         b'<aside id="feed" class="feed" aria-label="Crew comms">'),
+        (b'  <div class="feed-head">CREW COMMS <span class="hint">&middot; click a god to talk</span></div>',
+         b'  <div class="feed-head"><span class="feed-title">CREW COMMS</span> <span class="hint">&middot; click a god to talk</span><label class="sr-only" for="crew-select">Choose a god to talk to</label><select id="crew-select" class="feed-ctl" title="Crew comms: choose a god to talk to"></select><button id="btn-talk" class="feed-ctl" type="button" title="Crew comms: talk to the chosen god">TALK</button></div>'),
+        (b'  <ol id="feed-list"></ol>', b'  <ol id="feed-list" aria-live="polite"></ol>'),
+        (b'<div id="toast" class="toast" hidden></div>',
+         b'<div id="toast" class="toast" role="status" hidden></div>'),
+    ]
+    def projected_tags(html):
+        for before, after in html_deltas:
+            assert html.count(after) == 1, 'approved input-layer delta missing/nonunique'
+            assert before not in html, 'mixed old/new input-layer delta'
+            html = html.replace(after, before)
+        return re.findall(rb'<[^>]+>', html)
+    assert re.findall(rb'<[^>]+>', ORIGINAL) == projected_tags(current)
+    # Prove the projection cannot launder unrelated tag/attribute drift or a
+    # malformed/deleted/duplicated new control. Production gate code stays intact.
+    projection_mutations = [
+        current.replace(b'<header class="hud">', b'<header class="hud" hidden>'),
+        current.replace(b'id="link-buy"', b'id="link-buy" hidden'),
+        current.replace(b'<select id="crew-select"', b'<select hidden id="crew-select"'),
+        current.replace(html_deltas[1][1], b''),
+        current.replace(html_deltas[1][1], html_deltas[1][1] * 2),
+    ]
+    for mutant in projection_mutations:
+        refused = False
+        try:
+            refused = re.findall(rb'<[^>]+>', ORIGINAL) != projected_tags(mutant)
+        except AssertionError:
+            refused = True
+        assert refused, 'input-layer projection mutation escaped'
+    print('5/5 exact projection mutations refused; whole-DOM equality retained')
     print('%d negative mutations rejected; 8 encoding/formatting positives PASS' % mutations)
     print('Original function sources + CHECKS rows unchanged; README + LF + DOM preservation PASS')
     return 0

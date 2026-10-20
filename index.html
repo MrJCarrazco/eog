@@ -53,9 +53,9 @@
   </div>
 </header>
 
-<aside id="feed" class="feed" aria-live="polite">
-  <div class="feed-head">CREW COMMS <span class="hint">&middot; click a god to talk</span></div>
-  <ol id="feed-list"></ol>
+<aside id="feed" class="feed" aria-label="Crew comms">
+  <div class="feed-head"><span class="feed-title">CREW COMMS</span> <span class="hint">&middot; click a god to talk</span><label class="sr-only" for="crew-select">Choose a god to talk to</label><select id="crew-select" class="feed-ctl" title="Crew comms: choose a god to talk to"></select><button id="btn-talk" class="feed-ctl" type="button" title="Crew comms: talk to the chosen god">TALK</button></div>
+  <ol id="feed-list" aria-live="polite"></ol>
 </aside>
 
 <div id="dialog" class="dialog" hidden role="dialog" aria-labelledby="dlg-name">
@@ -92,7 +92,7 @@
   </div>
 </div>
 
-<div id="toast" class="toast" hidden></div>
+<div id="toast" class="toast" role="status" hidden></div>
 
 <script src="js/demo-data.js"></script>
 <script src="js/sprite-load-plan.js"></script>
