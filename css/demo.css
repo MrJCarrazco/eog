@@ -266,3 +266,16 @@ html, body { margin: 0; height: 100%; overflow: hidden; background: #03060d; col
 @media (max-height: 500px) {
   .feed-title { display: none; }
 }
+
+/* Publisher policies: separate from the HUD, crew controls and commercial exits. */
+.publisher-policies {
+  position: fixed; right: 6px; bottom: 0; z-index: 5;
+  display: flex; gap: 6px; padding: 0 3px;
+  background: #03060d; border: 1px solid #8fa6bf; border-radius: 3px;
+  font-family: var(--font); font-size: 18px; line-height: 1;
+}
+.publisher-policies a {
+  display: inline-flex; align-items: center; min-height: 32px;
+  color: #5ad0ff; text-underline-offset: 3px;
+}
+.publisher-policies a:focus-visible { outline: 2px solid #ffd45a; outline-offset: 1px; }
