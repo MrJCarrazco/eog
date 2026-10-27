@@ -116,7 +116,11 @@ html, body { margin: 0; height: 100%; overflow: hidden; background: #03060d; col
   .hud-btn { padding: 4px 8px; font-size: 15px; }
   .hud-actions { gap: 4px; }
   .badge { font-size: 15px; padding: 3px 7px; }
-  .feed { max-width: 62vw; font-size: 10px; max-height: 22vh; }
+  /* capped panel: the header stays, the newest lines stay at the bottom, older text clips at the top
+     (a bare max-height let long wrapped lines spill out of the box and off the screen bottom) */
+  .feed { max-width: 62vw; max-height: 22vh; display: flex; flex-direction: column; overflow: hidden; }
+  .feed-head { flex: none; }
+  .feed ol { flex: 1 1 auto; min-height: 0; overflow: hidden; display: flex; flex-direction: column; justify-content: flex-end; }
   .upsell { max-width: 88vw; right: 2vw; }
 }
 
@@ -279,3 +283,33 @@ html, body { margin: 0; height: 100%; overflow: hidden; background: #03060d; col
   color: #5ad0ff; text-underline-offset: 3px;
 }
 .publisher-policies a:focus-visible { outline: 2px solid #ffd45a; outline-offset: 1px; }
+
+/* ---------- Day-1 report card (built by js/demo.js at the first morning) ----------
+   Non-blocking, in the upsell's slot (the two never show together). */
+.report {
+  position: fixed; right: 14px; bottom: 14px; z-index: 6; width: min(380px, 90vw);
+  max-height: calc(100vh - var(--hud-h, 56px) - 22px); overflow-y: auto;
+  background: var(--panel); border: 1px solid var(--gold); border-radius: 4px; padding: 12px 14px;
+  box-shadow: 0 0 24px rgba(255, 212, 90, 0.22); font-size: 20px; line-height: 1.2; animation: cardin 0.22s ease;
+}
+.report[hidden] { display: none; }
+.report-title { color: var(--gold); font-size: 24px; letter-spacing: 1px; padding-right: 24px; }
+.report-x { position: absolute; top: 4px; right: 8px; background: none; border: 0; color: var(--dim); font-size: 26px; cursor: pointer; font-family: var(--font); }
+.report-stats { list-style: none; margin: 8px 0; padding: 0; display: grid; grid-template-columns: 1fr 1fr; gap: 2px 14px; font-size: 18px; color: var(--dim); }
+.report-stats li { display: flex; justify-content: space-between; gap: 6px; }
+.report-stats b { color: var(--ink); font-weight: normal; }
+.report-quote { margin: 8px 0; }
+.report-quote .who { display: block; margin-top: 2px; font-size: 18px; }
+.report-links { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 10px; }
+.report-links .hud-btn { display: inline-flex; align-items: center; min-height: 36px; }
+@media (pointer: coarse) { .report-links .hud-btn { min-height: 44px; } }
+@media (max-width: 640px) {
+  .report { right: 2vw; max-width: 88vw; font-size: 17px; padding: 8px 10px; }
+  .report-title { font-size: 20px; }
+  .report-stats { font-size: 15px; }
+}
+@media (max-height: 500px) {
+  .report { bottom: 6px; max-height: calc(100vh - var(--hud-h, 56px) - 12px); font-size: 17px; padding: 8px 12px; }
+  .report-title { font-size: 20px; }
+  .report-stats { grid-template-columns: repeat(4, auto); font-size: 15px; }
+}
