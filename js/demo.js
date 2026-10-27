@@ -503,6 +503,7 @@
     evFocusBack = null;
     evEl.hidden = true;
     eventAt = clock.now + rnd(EVENT_MIN, EVENT_MAX);
+    if (upsellDeferred) { upsellDeferred = false; if (!upsellShown && !dlg) openUpsell(); }
     // give focus back only if the event still holds it (the player may have tabbed elsewhere)
     if (back && owned) {
       if (back === btnTalk) btnTalk.focus();
@@ -553,6 +554,7 @@
     dlgName.textContent = b.cast.name.toUpperCase(); dlgName.style.color = b.cast.color;
     dlgTitle.textContent = b.cast.title;
     dlgEl.hidden = false;
+    upsell.hidden = true;   // a dialogue outranks the upsell; it never sits on top of the card
     stats.dialogsOpened++;
     showNode('start', now + 1000, wasAsleep, !!opener);
   }
@@ -1136,6 +1138,18 @@
   /* ---------- main loop ---------- */
   var clock = { now: 0 };
   var last = 0;
+  // backgrounding pauses the sim: rAF stops while hidden, so on return shift the
+  // day clock and event timers by the gap instead of letting them leap ahead
+  var hiddenAt = null;
+  document.addEventListener('visibilitychange', function () {
+    if (document.hidden) { hiddenAt = performance.now(); return; }
+    if (hiddenAt == null) return;
+    var gap = performance.now() - hiddenAt;
+    hiddenAt = null;
+    if (simStart != null) simStart += gap;
+    eventAt += gap;
+    if (activeEvent) activeEvent.born += gap;
+  });
   function frame(now) {
     var dt = Math.min(0.05, last ? (now - last) / 1000 : 0);
     if (last) {
@@ -1177,7 +1191,12 @@
 
   var upsell = document.getElementById('upsell');
   var upsellShown = false;
-  function openUpsell() { upsell.hidden = false; upsellShown = true; }
+  var upsellDeferred = false;
+  // e is the click event; the 75 s timer calls with none and waits out a live station event
+  function openUpsell(e) {
+    if (!e && activeEvent) { upsellDeferred = true; return; }
+    upsell.hidden = false; upsellShown = true;
+  }
   document.getElementById('demo-badge').addEventListener('click', openUpsell);
   document.getElementById('btn-full').addEventListener('click', openUpsell);
   upsell.querySelector('.upsell-x').addEventListener('click', function () { upsell.hidden = true; });
@@ -1187,10 +1206,19 @@
      and the player's itch login is already at hand there. On GitHub Pages the
      static order stands (paid exit first) because rating needs an itch login.
      DOM reorder only: no anchor is added/removed, so gate checks 9 and 11
-     (ask present, exactly 3 itch anchors with referrerpolicy=origin) hold. */
+     (ask present, exactly 3 itch anchors with referrerpolicy=origin) hold.
+     Gumroad attribution: the static utm_source=eog_demo is rewritten to
+     eog_itch / eog_pages per serving host so Gumroad shows which surface sells.
+     Any other host (local proofs) keeps eog_demo. href query only: no copy change. */
   (function promoteRatingOnItch() {
     var host = location.hostname;
-    if (!/(^|\.)itch\.(io|zone)$/.test(host)) return;
+    var itch = /(^|\.)itch\.(io|zone)$/.test(host);
+    var src = itch ? 'eog_itch' : /(^|\.)github\.io$/.test(host) ? 'eog_pages' : null;
+    if (src) ['link-buy', 'link-buy-hud'].forEach(function (id) {
+      var a = document.getElementById(id);
+      if (a) a.href = a.href.replace('utm_source=eog_demo', 'utm_source=' + src);
+    });
+    if (!itch) return;
     var rate = document.getElementById('link-rate');
     var buy = document.getElementById('link-buy');
     if (rate && buy && buy.parentNode) buy.parentNode.insertBefore(rate, buy);
