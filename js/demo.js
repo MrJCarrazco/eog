@@ -12,7 +12,9 @@
 
   /* ---------- config ---------- */
   var PLAY_LABEL = 'mrjcarrazco.github.io/eog';
+  var ITCH_LABEL = 'mrjcarrazco.itch.io/empire-of-gods';
   var GITHUB_URL = 'https://github.com/MrJCarrazco/eog';
+  var CAMPAIGN_URL = 'https://mrj89carrazco.github.io/empire-of-businesses-game/empire.html';
 
   var T = 12;                                  // world tile, in world units
   var COLS = 28, ROWS = 16;
@@ -444,7 +446,10 @@
   function onNightChange(now, night) {
     applyShift(now, night);
     if (night) feed('Station', '#ffd45a', 'Lights down. Artemis has the night shift. Everyone else: desk naps.', true);
-    else { feed('Station', '#ffd45a', 'Good morning, Olympus! Day ' + dayInfo.day + '. Apollo is back on solar.', true); bump({ morale: 3 }); }
+    else {
+      feed('Station', '#ffd45a', 'Good morning, Olympus! Day ' + dayInfo.day + '. Apollo is back on solar.', true); bump({ morale: 3 });
+      queueReport();   // first morning only: the Day-1 report card
+    }
   }
 
   /* ---------- events ---------- */
@@ -555,6 +560,7 @@
     dlgTitle.textContent = b.cast.title;
     dlgEl.hidden = false;
     upsell.hidden = true;   // a dialogue outranks the upsell; it never sits on top of the card
+    closeReport();          // ... and the Day-1 report card
     stats.dialogsOpened++;
     showNode('start', now + 1000, wasAsleep, !!opener);
   }
@@ -1063,13 +1069,24 @@
 
   /* ---------- input: click / tap a god ---------- */
   var hover = null;
+  /* touch-sized targets: on a phone a god is ~16 CSS px wide, so the hit box grows to >= 44 CSS px
+     both ways (a no-op at desktop scale). A god actually under the pointer still wins, front-most
+     first; otherwise the nearest god whose padded box holds the tap. */
   function bodyAt(clientX, clientY) {
     var w = toWorld(clientX, clientY);
-    var best = null;
+    var padX = Math.max(9, 22 / cam.s), minH = 44 / cam.s;
+    var best = null, tight = false, bestD = 1e9;
     bodies.forEach(function (b) {
-      var top = topOf(b) - 2;
-      if (w.x > b.px - 9 && w.x < b.px + 9 && w.y > top && w.y < b.py + 3) {
-        if (!best || b.py > best.py) best = b;
+      var top = topOf(b) - 2, bot = b.py + 3;
+      if (w.x > b.px - 9 && w.x < b.px + 9 && w.y > top && w.y < bot) {
+        if (!tight || b.py > best.py) { best = b; tight = true; }
+        return;
+      }
+      if (tight) return;
+      var grow = Math.max(0, (minH - (bot - top)) / 2);
+      if (w.x > b.px - padX && w.x < b.px + padX && w.y > top - grow && w.y < bot + grow) {
+        var d = Math.hypot(w.x - b.px, w.y - (top + bot) / 2);
+        if (d < bestD) { best = b; bestD = d; }
       }
     });
     return best;
@@ -1171,6 +1188,7 @@
       stepEvents(now);
       stepDialog(now);
       renderStats(now);
+      stepReport();
     }
     render(now);
     stats.frames++;
@@ -1192,14 +1210,35 @@
   var upsell = document.getElementById('upsell');
   var upsellShown = false;
   var upsellDeferred = false;
-  // e is the click event; the 75 s timer calls with none and waits out a live station event
+  var upsellBack = null;   // the HUD control that opened it by hand (focus goes back there)
+  // e is the click event; the 75 s timer calls with none and waits out a live station event.
+  // The timer is only the fallback: once the Day-1 report card has shown, it stays quiet.
+  // A manual open moves focus to the card's first link; an automatic one never takes focus.
   function openUpsell(e) {
+    if (!e && reportShown) return;
     if (!e && activeEvent) { upsellDeferred = true; return; }
     upsell.hidden = false; upsellShown = true;
+    if (!e) return;
+    closeReport();
+    upsellBack = e.currentTarget || null;
+    var first = upsell.querySelector('.upsell-links a[href]');
+    if (first) first.focus();
+  }
+  function closeUpsell() {
+    var back = upsellBack, inside = upsell.contains(document.activeElement);
+    upsellBack = null;
+    upsell.hidden = true;
+    if (back && inside && back.isConnected) back.focus();
   }
   document.getElementById('demo-badge').addEventListener('click', openUpsell);
   document.getElementById('btn-full').addEventListener('click', openUpsell);
-  upsell.querySelector('.upsell-x').addEventListener('click', function () { upsell.hidden = true; });
+  upsell.querySelector('.upsell-x').addEventListener('click', closeUpsell);
+  // Escape closes the upsell / report cards too (the select keeps its own Escape, as for the dialogue)
+  window.addEventListener('keydown', function (e) {
+    if (e.key !== 'Escape' || e.target === crewSel) return;
+    if (!upsell.hidden) closeUpsell();
+    closeReport();
+  });
   setTimeout(function () { if (!upsellShown && !dlg) openUpsell(); }, 75000);
   /* Council eog 2026-10-09: on the ITCH-SERVED surface only, the free 2-click
      rating ask outranks the $19 exit — itch's browse ranking pays in ratings
@@ -1233,6 +1272,82 @@
     toastEl.textContent = msg; toastEl.hidden = false;
     clearTimeout(toastT); toastT = setTimeout(function () { toastEl.hidden = true; }, 4200);
   }
+
+  /* ---------- DAY-1 REPORT CARD (first morning) ----------
+     The end-of-day exit: final Day-1 numbers, the best quote, then SHARE / itch / template /
+     campaign. Built here, not in index.html: the gates pin the template's whole tag list and
+     exactly three itch anchors. So the itch ask is a BUTTON that clicks the pinned #link-rate
+     (keeping its referrerpolicy=origin attribution), never a 4th itch anchor. Non-blocking in the
+     upsell's slot; never takes focus; waits out a live event, an open dialogue or a hand-opened
+     upsell, and replaces an auto-opened one. */
+  var reportEl = null, reportDay = null, reportQueued = false, reportShown = false;
+  function queueReport() {
+    if (reportDay) return;
+    var q = lastQuote;
+    reportDay = { power: Math.round(sim.power), morale: Math.round(sim.morale), ambrosia: Math.round(sim.ambrosia),
+      lines: stats.linesSpoken, talks: stats.dialogsOpened, choices: stats.choicesMade, events: stats.eventsResolved,
+      quote: q && { name: q.name, title: q.title, color: q.color, line: q.line } };
+    reportQueued = true;
+  }
+  function stepReport() {
+    if (!reportQueued || activeEvent || dlg || (!upsell.hidden && upsellBack)) return;
+    reportQueued = false;
+    openReport();
+  }
+  function node(tag, cls, text) {
+    var n = document.createElement(tag);
+    if (cls) n.className = cls;
+    if (text != null) n.textContent = text;
+    return n;
+  }
+  function openReport() {
+    var d = reportDay;
+    reportEl = node('div', 'report');
+    reportEl.id = 'report';
+    reportEl.setAttribute('role', 'dialog');
+    reportEl.setAttribute('aria-labelledby', 'report-title');
+    var x = node('button', 'report-x', '×');
+    x.type = 'button'; x.setAttribute('aria-label', 'Close');
+    x.addEventListener('click', closeReport);
+    reportEl.appendChild(x);
+    var title = node('div', 'report-title', 'DAY 1 REPORT');
+    title.id = 'report-title';
+    reportEl.appendChild(title);
+    var list = node('ul', 'report-stats');
+    [['⚡ POWER', d.power], ['☺ MORALE', d.morale], ['◉ AMBROSIA', d.ambrosia], ['LINES SPOKEN', d.lines],
+     ['TALKS', d.talks], ['CHOICES', d.choices], ['EVENTS', d.events]].forEach(function (r) {
+      var li = node('li', null, r[0] + ' ');
+      li.appendChild(node('b', null, String(r[1])));
+      list.appendChild(li);
+    });
+    reportEl.appendChild(list);
+    if (d.quote) {
+      var q = node('p', 'report-quote', 'Best line: “' + d.quote.line + '”');
+      var who = node('span', 'who', '— ' + d.quote.name + ', ' + d.quote.title);
+      who.style.color = d.quote.color;
+      q.appendChild(who);
+      reportEl.appendChild(q);
+    }
+    var links = node('div', 'report-links');
+    var shareBtn = node('button', 'hud-btn', '📸 SHARE');
+    shareBtn.type = 'button';
+    shareBtn.addEventListener('click', share);
+    var rateBtn = node('button', 'hud-btn', '★ TIP / RATE ON ITCH');
+    rateBtn.type = 'button';
+    rateBtn.addEventListener('click', function () { var a = document.getElementById('link-rate'); if (a) a.click(); });
+    var buy = node('a', 'hud-btn accent', 'GET THE TEMPLATE — $19');
+    buy.href = document.getElementById('link-buy').href.replace('utm_medium=upsell', 'utm_medium=report');
+    var camp = node('a', 'hud-btn', '▶ PLAY THE 18-MISSION CAMPAIGN');
+    camp.href = CAMPAIGN_URL;
+    camp.title = 'Empire of Businesses: an 18-mission campaign, free in your browser';
+    [buy, camp].forEach(function (a) { a.target = '_blank'; a.rel = 'noopener'; });
+    [shareBtn, rateBtn, buy, camp].forEach(function (n) { links.appendChild(n); });
+    reportEl.appendChild(links);
+    upsell.hidden = true;   // replaces an auto-opened upsell (a hand-opened one was waited out)
+    document.body.insertBefore(reportEl, toastEl);
+    reportShown = true;
+  }
+  function closeReport() { if (reportEl) reportEl.hidden = true; }
 
   /* ---------- SHARE CARD ---------- */
   function buildShareCard() {
@@ -1273,21 +1388,44 @@
     x.font = '30px ' + FONT; x.fillStyle = q.color;
     x.fillText('— ' + q.name + ', ' + q.title, 40, bandY + 22 + lines.length * 38);
     x.font = '26px ' + FONT; x.fillStyle = '#8fa6bf'; x.textAlign = 'right';
-    x.fillText('Empire of Gods — play free: ' + PLAY_LABEL, W - 30, H - 36);
+    var foot = 'Empire of Gods — play free: ' + ITCH_LABEL;
+    if (x.measureText(foot + '  ·  ' + PLAY_LABEL).width <= W - 60) foot += '  ·  ' + PLAY_LABEL;
+    x.fillText(foot, W - 30, H - 36);
     return c;
   }
+  function saveCard(c, name) {
+    c.toBlob(function (blob) {
+      if (!blob) { toast('Could not render the share card.'); return; }
+      var url = URL.createObjectURL(blob);
+      var a = document.createElement('a');
+      a.href = url; a.download = name;
+      document.body.appendChild(a); a.click(); a.remove();
+      setTimeout(function () { URL.revokeObjectURL(url); }, 4000);
+      toast('Share card saved — post it anywhere!');
+    }, 'image/png');
+  }
+  function pngFile(c, name) {   // synchronous (data URL), so the tap's user activation is still live for share()
+    var url = c.toDataURL('image/png'), bin = atob(url.slice(url.indexOf(',') + 1)), buf = new Uint8Array(bin.length);
+    for (var i = 0; i < bin.length; i++) buf[i] = bin.charCodeAt(i);
+    return new File([buf], name, { type: 'image/png' });
+  }
+  /* touch devices (iOS Safari cannot save a download to Photos): the native share sheet with the
+     PNG when the browser can share files; everywhere else, or if sharing fails, the download */
   function share() {
     var c = buildShareCard();
+    var name = 'empire-of-gods-day' + dayInfo.day + '-' + Date.now() + '.png';
     try {
-      c.toBlob(function (blob) {
-        if (!blob) { toast('Could not render the share card.'); return; }
-        var url = URL.createObjectURL(blob);
-        var a = document.createElement('a');
-        a.href = url; a.download = 'empire-of-gods-day' + dayInfo.day + '-' + Date.now() + '.png';
-        document.body.appendChild(a); a.click(); a.remove();
-        setTimeout(function () { URL.revokeObjectURL(url); }, 4000);
-        toast('Share card saved — post it anywhere!');
-      }, 'image/png');
+      var coarse = !!(window.matchMedia && window.matchMedia('(pointer: coarse)').matches);
+      if (coarse && navigator.share && navigator.canShare && window.File) {
+        var file = pngFile(c, name);
+        if (navigator.canShare({ files: [file] })) {
+          navigator.share({ files: [file], title: 'Empire of Gods' }).catch(function (err) {
+            if (!err || err.name !== 'AbortError') saveCard(c, name);
+          });
+          return;
+        }
+      }
+      saveCard(c, name);
     } catch (e) {
       toast('Share cards need the hosted page (' + PLAY_LABEL + ') — browsers block image export from file://.');
     }
@@ -1308,7 +1446,8 @@
         dialogOpen: !!dlg, dialogGod: dlg ? dlg.b.id : null, dialogsOpened: stats.dialogsOpened, choicesMade: stats.choicesMade,
         eventsFired: eventsFired, eventActive: activeEvent ? activeEvent.ev.id : null, eventsResolved: stats.eventsResolved,
         sim: { power: Math.round(sim.power), morale: Math.round(sim.morale), ambrosia: Math.round(sim.ambrosia) },
-        day: dayInfo.day, clock: dayInfo.hhmm, night: dayInfo.night, pairIcons: stats.pairIcons || 0
+        day: dayInfo.day, clock: dayInfo.hhmm, night: dayInfo.night, pairIcons: stats.pairIcons || 0,
+        reportShown: reportShown, reportOpen: !!(reportEl && !reportEl.hidden)
       };
     },
     /* screen-space centre of a god's drawn body (so the proof can click it like a user) */
