@@ -313,3 +313,24 @@ html, body { margin: 0; height: 100%; overflow: hidden; background: #03060d; col
   .report-title { font-size: 20px; }
   .report-stats { grid-template-columns: repeat(4, auto); font-size: 15px; }
 }
+
+/* ---------- Pass 5 (council WO#6): DEMO MODE panel, share-save card, free-vs-$19 + itch notes ---------- */
+.demo-panel p { margin: 8px 0; }
+.demo-panel b { color: var(--gold); font-weight: normal; }
+/* the share-save card sits under the HUD (not in the report's slot), so SHARE from the report keeps it */
+.report.share-panel { top: calc(var(--hud-h, 56px) + 8px); bottom: auto; left: 50%; right: auto; transform: translateX(-50%);
+  width: min(420px, 92vw); max-width: none; z-index: 8; animation: none; }
+.share-preview { display: block; width: 100%; height: auto; margin: 8px 0; border: 1px solid var(--edge); }
+.share-panel p { margin: 6px 0; }
+.share-name { color: var(--ink); font-weight: normal; overflow-wrap: anywhere; }
+.share-local { color: var(--dim); }
+.itch-note { margin-top: 8px; font-size: 16px; line-height: 1.2; color: var(--dim); }
+/* "$19" buttons carry a second line: the game itself stays free. On the HUD only where there is room
+   (wide + tall); narrower HUDs keep the same sentence in the button's title. */
+.buy-note { display: none; }
+.report .buy-2line { flex-direction: column; line-height: 1.05; }
+.report .buy-note { display: block; font-size: 15px; letter-spacing: 0; color: var(--dim); }
+@media (min-width: 1241px) and (min-height: 501px) {
+  .hud .buy-2line { flex-direction: column; line-height: 1; }
+  .hud .buy-note { display: block; font-size: 14px; letter-spacing: 0; color: var(--dim); }
+}
